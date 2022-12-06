@@ -35,7 +35,7 @@ module mpeg2encoder #(
 //
 // Definition of nouns:
 //     tile        : 8x8 pixels, the unit of DCT, quantize and zig-zag reorder
-//     block (blk) : contains 16x16 U pixels (4tiles
+//     block (blk) : contains 16x16 U pixels (4 tiles of Y, 1 tile of U, 1 tile of V)
 //     slice       : a line of block (16 lines of pixels)
 //
 // Note : 
