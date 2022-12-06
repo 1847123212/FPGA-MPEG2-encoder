@@ -26,7 +26,7 @@ module mpeg2encoder #(
     // Video sequence output MPEG2 stream interface. --------------------------------------------------------------------------------------------------------
     output wire        o_en,                     // o_en=1 indicates o_data is valid
     output wire        o_last,                   // o_en=1 & o_last=1 indicates this is the last data of a video sequence
-    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in BIG ENDIAN, i.e., o_data[255:248] is the 1st byte, o_data[247:0] is the 2nd byte, ... o_data[7:0] is the 31st byte.
+    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in BIG ENDIAN, i.e., o_data[255:248] is the 1st byte, o_data[247:0] is the 2nd byte, ... o_data[7:0] is the 32nd byte.
 );
 
 
