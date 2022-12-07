@@ -76,7 +76,7 @@ module mpeg2encoder #(
     // Video sequence output MPEG2 stream interface. --------------------------------------------------------------------------------------------------------
     output wire        o_en,                     // o_en=1 indicates o_data is valid
     output wire        o_last,                   // o_en=1 & o_last=1 indicates this is the last data of a video sequence
-    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in BIG ENDIAN, i.e., o_data[255:248] is the 1st byte, o_data[247:0] is the 2nd byte, ... o_data[7:0] is the 31st byte.
+    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in BIG ENDIAN, i.e., o_data[255:248] is the 1st byte, o_data[247:0] is the 2nd byte, ... o_data[7:0] is the 32nd byte.
 );
 ```
 
@@ -199,17 +199,19 @@ i_V2 = V102
 i_V3 = V103
 ```
 
-:warning: 本模块**并不要求连续输入像素**，当发送者没有准备好像素时，**可以随时插入气泡**，也即让 `i_en=0`
+:warning: 本模块**可以连续每周期都输入4个像素而不需要任何等待 (没有输入反压握手)**，但**当发送者没有准备好像素时，也可以断续地输入像素** (可以随时插入气泡) ，也即让 `i_en=0` 。
 
 ### 输入配置
 
 当输入一个视频序列的最前面的4个像素 (也即第0帧第0行的前4个像素) 的同时，需要让 `i_xsize16`, `i_ysize16` , `i_pframes_count` 有效，其中：
 
--  `i_xsize16` 是视频宽度/16 。例如对于 640x480 的视频，应该取 `i_xsize16 = 640/16 = 40` 。`i_xsize16` 取值范围为 `4~(2^XL)` 。
--  `i_ysize16` 是视频宽度/16 。例如对于 640x480 的视频，应该取 `i_xsize16 = 480/16 = 30` 。`i_ysize16` 取值范围为 `4~(2^YL)` 。
+-  `i_xsize16` 是视频宽度/16 。例如对于 640x480 的视频，应该取 `i_xsize16 = 640/16 = 40` 。注意`i_xsize16` 取值范围为 `4~(2^XL)` 。
+-  `i_ysize16` 是视频宽度/16 。例如对于 640x480 的视频，应该取 `i_xsize16 = 480/16 = 30` 。注意 `i_ysize16` 取值范围为 `4~(2^YL)` 。
 - `i_pframes_count` 决定了相邻两个 I 帧之间 P 帧的数量，可以取 `0~255` ，越大则压缩率越高，推荐的取值是 23 。
 
-> :warning: 本模块只支持宽和高都为 16 的倍数的视频，例如 1920x1152 。如果视频的宽和高不为 16 ，则应该填充为 16 的倍数后再送入本模块。例如 1910x1080 的视频应该填充为 1920x1088 。
+:warning: 本模块只支持宽和高都为 16 的倍数的视频，例如 1920x1152 。如果视频的宽和高不为 16 ，则应该填充为 16 的倍数后再送入本模块。例如 1910x1080 的视频应该填充为 1920x1088 。
+
+:warning: 本模块不支持宽和高小于 64 的视频，因此 `i_xsize16` 和 `i_ysize16` 的最小合法取值是 `4`
 
 ### 结束当前视频序列
 
@@ -222,7 +224,7 @@ i_V3 = V103
 
 ### 开始输入下一个视频序列
 
-当上一个视频序列完全结束 ( `o_sequence_busy` 从 `1` 变为 `0` ) 后，才可以开始输入下一个视频序列 (也就是输入下一个视频序列的最前面的4个像素，同时让 `i_xsize16`, `i_ysize16` , `i_pframes_count` 有效) 。
+当上一个视频序列完全结束 ( `o_sequence_busy` 从 `1` 变为 `0` ) 后，才可以开始输入下一个视频序列 (也即输入下一个视频序列的最前面的4个像素，同时让 `i_xsize16`, `i_ysize16` , `i_pframes_count` 有效) 。
 
 ### 输出 MPEG2 码流
 
@@ -232,13 +234,13 @@ i_V3 = V103
 
 > :warning: `o_data` 是 **大端序(Big Endian)** ，也即 o_data[255:248] 是最靠前的字节, o_data[247:0] 是第二个字节, ... o_data[7:0] 是最后一个字节。当你把 `o_data` 送入总线时，可能需要手动编写一个大小端序转换，因为大多数总线是小端序 (例如 AXI 总线)
 
->  :point_right:  `o_en=1` 的同时必然有 `o_sequence_busy=1` 。当模块空闲 (也即 `o_sequence_busy=0` ) 时，它不可能输出数据 (也即不可能出现 `o_en=1`)
+>  :point_right:  `o_en=1` 的同时必然有 `o_sequence_busy=1` 。当模块空闲 (也即 `o_sequence_busy=0` ) 时，它不可能输出数据 (不可能出现 `o_en=1`)
 
 　
 
 ## 示例波形
 
-总结以上叙述，对模块的操作波形举例如 **图1** 。
+总结以上叙述，对模块的操作波形举例如 **图1** ，其中灰色的波形代表 don't care (可以取任意值，而不影响模块的工作) 。
 
 - 最开始， `o_sequence_busy=0` 说明模块当前空闲，可以输入一个新的视频序列。
 - 让 `i_en=1` ，输入一个视频序列的最前面的4个像素，同时在 `i_xsize16`, `i_ysize16` 上输入该视频的宽、高信息；在 `i_pframes_count` 上输入你想要的 I 帧间距。
@@ -334,7 +336,7 @@ python convert_video_to_yuv_raw.py 1.mp4 1.raw
 
 然后你可能还需要配置第 22\~23 行的参数 `XL` 和 `YL` ，详见**表1** 。
 
-然后你就可以开始运行仿真。当3个视频都编码结束后，仿真程序会遇到 `$finish` 而结束。产生 3 个 .m2v 文件，它们**可以被常见的视频查看器打开** (在 Windows 里可以使用 Windows Media Player 打开，直接双击打开即可) 。
+然后你就可以开始运行仿真，该仿真需要消耗很长时间 (用我提供的 3 个 YUV RAW 文件，大概需要2\~3小时）。当3个视频都编码结束后，仿真程序会遇到 `$finish` 而结束。产生 3 个 .m2v 文件，它们**可以被常见的视频查看器打开** (在 Windows 里可以使用 Windows Media Player 打开，直接双击打开即可) 。
 
 　
 
