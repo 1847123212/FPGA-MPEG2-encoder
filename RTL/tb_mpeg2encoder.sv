@@ -23,20 +23,20 @@ localparam XL = 7;         // max horizontal pixel count.  4->256 pixels  5->512
 localparam YL = 6;         // max vertical   pixel count.  4->256 pixels  5->512 pixels  6->1024 pixels  7->2048 pixels .
 
 // video 1 --------------------------------------------------------------------------------------------
-`define VIDEO1_IN_YUV_RAW_FILE  "E:/github_hardware/MPEG2/data/288x208.raw"
-`define VIDEO1_OUT_MPEG2_FILE   "E:/github_hardware/MPEG2/data/288x208.m2v"
+`define VIDEO1_IN_YUV_RAW_FILE  "D:/FPGAopensource/MPEG2/FPGA-MPEG2-encoder/data/288x208.raw"
+`define VIDEO1_OUT_MPEG2_FILE   "D:/FPGAopensource/MPEG2/FPGA-MPEG2-encoder/data/288x208.m2v"
 `define VIDEO1_XSIZE  288
 `define VIDEO1_YSIZE  208
 
 // video 2 --------------------------------------------------------------------------------------------
-`define VIDEO2_IN_YUV_RAW_FILE  "E:/github_hardware/MPEG2/data/640x320.raw"
-`define VIDEO2_OUT_MPEG2_FILE   "E:/github_hardware/MPEG2/data/640x320.m2v"
+`define VIDEO2_IN_YUV_RAW_FILE  "D:/FPGAopensource/MPEG2/FPGA-MPEG2-encoder/data/640x320.raw"
+`define VIDEO2_OUT_MPEG2_FILE   "D:/FPGAopensource/MPEG2/FPGA-MPEG2-encoder/data/640x320.m2v"
 `define VIDEO2_XSIZE  640
 `define VIDEO2_YSIZE  320
 
 // video 3 --------------------------------------------------------------------------------------------
-`define VIDEO3_IN_YUV_RAW_FILE  "E:/github_hardware/MPEG2/data/1440x704.raw"
-`define VIDEO3_OUT_MPEG2_FILE   "E:/github_hardware/MPEG2/data/1440x704.m2v"
+`define VIDEO3_IN_YUV_RAW_FILE  "D:/FPGAopensource/MPEG2/FPGA-MPEG2-encoder/data/1440x704.raw"
+`define VIDEO3_OUT_MPEG2_FILE   "D:/FPGAopensource/MPEG2/FPGA-MPEG2-encoder/data/1440x704.m2v"
 `define VIDEO3_XSIZE  1440
 `define VIDEO3_YSIZE  704
 
@@ -73,7 +73,7 @@ reg          i_sequence_stop = '0;
 wire         o_sequence_busy;
 
 reg  [ XL:0] i_xsize16;
-reg  [ XL:0] i_ysize16;
+reg  [ YL:0] i_ysize16;
 
 reg          i_en = '0;
 reg  [  7:0] i_Y0, i_Y1, i_Y2, i_Y3;
@@ -249,7 +249,7 @@ initial begin
                     @(posedge clk);
                 while (o_sequence_busy) begin         // wait until o_sequence_busy = 0 (sequence end)
                     if (o_en)
-                        for(int i=31; i>=0; i--)
+                        for(int i=0; i<32; i++)
                             $fwrite(fp_out, "%c", o_data[i*8 +: 8] );
                     @(posedge clk);
                 end

@@ -26,7 +26,7 @@ module mpeg2encoder #(
     // Video sequence output MPEG2 stream interface. --------------------------------------------------------------------------------------------------------
     output wire        o_en,                     // o_en=1 indicates o_data is valid
     output wire        o_last,                   // o_en=1 & o_last=1 indicates this is the last data of a video sequence
-    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in BIG ENDIAN, i.e., o_data[255:248] is the 1st byte, o_data[247:0] is the 2nd byte, ... o_data[7:0] is the 32nd byte.
+    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in LITTLE ENDIAN, i.e., o_data[7:0] is the 1st byte, o_data[15:8] is the 2nd byte, ... o_data[255:248] is the 32nd byte.
 );
 
 
@@ -2340,7 +2340,38 @@ always @ (posedge clk or negedge rstn)
 
 assign o_en   = v_en;
 assign o_last = v_last;
-assign o_data = v_data;
+assign o_data = {   v_data[  0 +: 8],      // convert BIG ENDIAN to LITTLE ENDIAN
+                    v_data[  8 +: 8],
+                    v_data[ 16 +: 8],
+                    v_data[ 24 +: 8],
+                    v_data[ 32 +: 8],
+                    v_data[ 40 +: 8],
+                    v_data[ 48 +: 8],
+                    v_data[ 56 +: 8],
+                    v_data[ 64 +: 8],
+                    v_data[ 72 +: 8],
+                    v_data[ 80 +: 8],
+                    v_data[ 88 +: 8],
+                    v_data[ 96 +: 8],
+                    v_data[104 +: 8],
+                    v_data[112 +: 8],
+                    v_data[120 +: 8],
+                    v_data[128 +: 8],
+                    v_data[136 +: 8],
+                    v_data[144 +: 8],
+                    v_data[152 +: 8],
+                    v_data[160 +: 8],
+                    v_data[168 +: 8],
+                    v_data[176 +: 8],
+                    v_data[184 +: 8],
+                    v_data[192 +: 8],
+                    v_data[200 +: 8],
+                    v_data[208 +: 8],
+                    v_data[216 +: 8],
+                    v_data[224 +: 8],
+                    v_data[232 +: 8],
+                    v_data[240 +: 8],
+                    v_data[248 +: 8] };
 
 
 endmodule
