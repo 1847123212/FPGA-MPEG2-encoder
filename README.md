@@ -1,38 +1,429 @@
- ![语言](https://img.shields.io/badge/语言-systemverilog_(IEEE1800_2005)-CAD09D.svg) ![部署](https://img.shields.io/badge/部署-quartus-blue.svg) ![部署](https://img.shields.io/badge/部署-vivado-FF1010.svg)
+![语言](https://img.shields.io/badge/语言-verilog_(IEEE1364_2001)-9A90FD.svg) ![仿真](https://img.shields.io/badge/仿真-iverilog-green.svg) ![部署](https://img.shields.io/badge/部署-quartus-blue.svg) ![部署](https://img.shields.io/badge/部署-vivado-FF1010.svg)
+
+[English](#en) | [中文](#cn)
 
 　
 
-FPGA MPEG2 video encoder
+<span id="en">FPGA MPEG2 video encoder</span>
+===========================
+
+High performance MPEG2 encoder for video compression.
+
+![diagram](./figures/diagram.png)
+
+* **Input**: YUV 444 raw pixels
+  * The most convenient input order: frame by frame, row by row, column by column.
+  * Adjacent 4 pixels can be input per cycle without backpressure handshake (pixels can be input in any cycle without pause).
+* **Output** MPEG2 stream. Once it is stored in a file, it can be opened and viewed using media players, e.g. VLC Media Player 3.0.18
+* **Code compatibility**: Written in pure Verilog2001, universal for various FPGA platforms.
+* **Performance** ：
+  * 4 pixels input per cycle
+  * 67 MHz maximum clock frequency on Xilinx Kintex-7 XC7K325 TFFV676-1
+  * The throughput reaches 67 * 4 = **268 MPixels/s**. The encoding frame rate for 1920x1152 video is 121 fps.
+* **Resource consumption**：
+  * **No external memory required**
+  * Typical configuration consumes **134k LUT**, on Xilinx 7 Series FPGAs
+* **Static adjustable parameters** (not adjustable after deployment):
+  * Maximum width and height of the supported video: the larger, the more BRAM it consumes
+  * The larger the search range of action estimation is, the higher the compression rate is, but the more LUT is consumed.
+  * Quantization level: The higher the level, the higher the compression rate, but the worse the output video quality
+* **Dynamic adjustable parameters** (adjustable at runtime for each video sequence):
+  * Video width and height
+  * I-frame interval (the number of P-frames between two I-frames): The larger, the higher the compression ratio.
+
+　
+
+# Module Usage
+
+[RTL/mpeg2encoder.v](./RTL/mpeg2encoder.v) Is the top module of the MPEG2 encoder (single module design, no sub-modules).
+
+Its parameters and ports are as follows:
+
+
+```verilog
+module mpeg2encoder #(
+    parameter  XL           = 6,   // determine the max horizontal pixel count.  4->256 pixels  5->512 pixels  6->1024 pixels  7->2048 pixels .
+    parameter  YL           = 6,   // determine the max vertical   pixel count.  4->256 pixels  5->512 pixels  6->1024 pixels  7->2048 pixels .
+    parameter  VECTOR_LEVEL = 3,   // motion vector range level, must be 1, 2, or 3. The larger the XL, the higher compression ratio, and the more LUT resource is uses.
+    parameter  Q_LEVEL      = 2    // quantize level, must be 1, 2, 3 or 4. The larger the Q_LEVEL, the higher compression ratio and the lower quality.
+) (
+    input  wire        rstn,                     // =0:async reset, =1:normal operation. It MUST be reset before starting to use.
+    input  wire        clk,
+    // Video sequence configuration interface. --------------------------------------------------------------------------------------------------------------
+    input  wire [XL:0] i_xsize16,                // horizontal pixel count = i_xsize16*16 . valid range: 4 ~ 2^XL
+    input  wire [YL:0] i_ysize16,                // vertical   pixel count = i_ysize16*16 . valid range: 4 ~ 2^YL
+    input  wire [ 7:0] i_pframes_count,          // defines the number of P-frames between two I-frames. valid range: 0 ~ 255
+    // Video sequence input pixel stream interface. In each clock cycle, this interface can input 4 adjacent pixels in a row. Pixel format is YUV 4:4:4, the module will convert it to YUV 4:2:0, then compress it to MPEG2 stream. 
+    input  wire        i_en,                     // when i_en=1, 4 adjacent pixels is being inputted,
+    input  wire [ 7:0] i_Y0, i_Y1, i_Y2, i_Y3,   // input Y (luminance)
+    input  wire [ 7:0] i_U0, i_U1, i_U2, i_U3,   // input U (Cb, chroma blue)
+    input  wire [ 7:0] i_V0, i_V1, i_V2, i_V3,   // input V (Cr, chroma red)
+    // Video sequence control interface. --------------------------------------------------------------------------------------------------------------------
+    input  wire        i_sequence_stop,          // use this signal to stop a inputting video sequence
+    output wire        o_sequence_busy,          // =0: the module is idle and ready to encode the next sequence. =1: the module is busy to encode the current sequence
+    // Video sequence output MPEG2 stream interface. --------------------------------------------------------------------------------------------------------
+    output wire        o_en,                     // o_en=1 indicates o_data is valid
+    output wire        o_last,                   // o_en=1 & o_last=1 indicates this is the last data of a video sequence
+    output wire[255:0] o_data                    // output mpeg2 stream data, 32 bytes in LITTLE ENDIAN, i.e., o_data[7:0] is the 1st byte, o_data[15:8] is the 2nd byte, ... o_data[255:248] is the 32nd byte.
+);
+```
+
+　
+
+## Module parameters
+
+The parameters of the mpeg2encoder module are as follows **Table 1**.
+
+**Table 1** : *Description of module parameters*
+
+|     parameter     | valid range |Explain|
+| :------------: | :------: | ------------------------------------------------------------ |
+|      `XL`      | 4,5,6,7  |The maximum width of the video that the module can encode. 4- > 256 pixels, 5- > 512 pixels, 6- > 1024 pixels, 7- > 2048 pixels. Larger consumes more BRAM resource|
+|      `YL`      | 4,5,6,7  |The maximum height of the video that the module can encode. 4- > 256 pixels, 5- > 512 pixels, 6- > 1024 pixels, 7- > 2048 pixels. Larger consumes more BRAM resource|
+| `VECTOR_LEVEL` |  1,2,3   |Search range for motion estimate, 1- > 2 pixels, 2- > 4 pixels, 3- > 6 pixels. Larger means higher compression ratio, but consumes more LUT resources|
+|   `Q_LEVEL`    | 1,2,3,4  |The higher the quantization level, the higher the compression rate, but the worse the output video quality|
+
+:warning:  Before using this module, you need to decide `XL` and `YL` according to the size of the video you want to compress. For example, if you want to encode 1920x1152 video, you should choose `XL=YL=7` at-least. If you only want to encode 640x480 video, of course, you can also take `XL=YL=7` it, but to save BRAM resources, you can take it `XL=6, YL=5`.
+
+　
+
+## Module interface
+
+All signals are synchronous with `clk` 's rising edge of (the input signal should be updated on `clk` 's rising edge, and the output signal needs to be sampled on clk` 's rising edge) , except `rstn` that the signal is asynchronous reset.
+
+### Module reset
+
+ `rstn` It is asynchronous reset, `rstn=0` reset and `rstn=1` release reset of this module. After the FPGA is powered up, before using the module, **Must! Must! At least one reset must be performed**. No reset is required during normal operation. Of course, if you want to, you can also reset, and all the States of the module will be restored to the initial state.
+
+### Input pixels
+
+To use this module to encode a **Video sequence** sequence (a series of frames), the pixels need to be input into the module in the order of frame by frame, row by row, and column by column. Adjacent 4 pixels in the same row can be input per clock cycle.
+
+When user want to input once, set `i_en=1` , and 4 adjacent pixels must appear on `i_Y0, i_Y1, i_Y2, i_Y3, i_U0, i_U1, i_U2, i_U3, i_V0, i_V1, i_V2, i_V3` .
+
+Where `i_Y0, i_U0, i_V0` are Y, U, V values of the 1st pixel, `i_Y1, i_U1, i_V1` are Y, U, V values of the 2nd pixel, ...
+
+For example, a 64 x64 video sequence is as follows. Where `(Yijk, Uijk, Vijk)` represents the Y, U, V values of the pixel in the ith frame, jth row, and kth column:
+
+
+```
+frame0：
+  row0： (Y000, U000, V000), (Y001, U001, V001), (Y002, U002, V002), (Y003, U003, V003), (Y004, U004, V004), (Y005, U005, V005), (Y006, U006, V006), (Y007, U007, V007), (Y008, U008, V008), (Y009, U009, V009), ..., (Y0063, U0063, V0063)
+  row1： (Y010, U010, V010), (Y011, U011, V011), (Y012, U012, V012), (Y013, U013, V013), (Y014, U014, V014), (Y015, U015, V015), (Y016, U016, V016), (Y017, U017, V017), (Y018, U018, V018), (Y019, U019, V019), ..., (Y0163, U0163, V0163)
+  ...
+frame1：
+  row0： (Y100, U100, V100), (Y101, U101, V101), (Y102, U102, V102), (Y103, U103, V103), (Y104, U104, V104), ...
+  row1： (Y110, U110, V110), (Y111, U111, V111), (Y112, U112, V112), (Y113, U113, V113), (Y114, U114, V114), ...
+  ...
+...
+```
+
+The first clock cycle should input the first four pixels of frame 0, line 0:
+
+
+```
+1st clock cycle:
+i_Y0 = Y000
+i_Y1 = Y001
+i_Y2 = Y002
+i_Y3 = Y003
+i_U0 = U000
+i_U1 = U001
+i_U2 = U002
+i_U3 = U003
+i_V0 = V000
+i_V1 = V001
+i_V2 = V002
+i_V3 = V003
+```
+
+The next cycle should then:
+
+
+```
+2nd clock cycle
+i_Y0 = Y004
+i_Y1 = Y005
+i_Y2 = Y006
+i_Y3 = Y007
+i_U0 = U004
+i_U1 = U005
+i_U2 = U006
+i_U3 = U007
+i_V0 = V004
+i_V1 = V005
+i_V2 = V006
+i_V3 = V007
+```
+
+By analogy, it take 64/4 = 16 clock cycles to input row 0 of frame 0, and then that 17th clock cycle should input the first 4 pixel of frame0, row1 :
+
+
+```
+17th clock cycle
+i_Y0 = Y010
+i_Y1 = Y011
+i_Y2 = Y012
+i_Y3 = Y013
+i_U0 = U010
+i_U1 = U011
+i_U2 = U012
+i_U3 = U013
+i_V0 = V010
+i_V1 = V011
+i_V2 = V012
+i_V3 = V013
+```
+
+Continuing with this analogy, it takes 64 \* 64/4 = 1024 clock cycles to complete frame 0, and then the 1025th clock cycle should input the first 4 pixels of frame1, row0 :
+
+
+```
+1025th clock cycle
+i_Y0 = Y100
+i_Y1 = Y101
+i_Y2 = Y102
+i_Y3 = Y103
+i_U0 = U100
+i_U1 = U101
+i_U2 = U102
+i_U3 = U103
+i_V0 = V100
+i_V1 = V101
+i_V2 = V102
+i_V3 = V103
+```
+
+:warning:  This module **can continuously input 4 pixels per cycle without stall (no input back pressure handshake).** However, **Pixels may also be input intermittently when the sender does not have the pixels ready** , that is, let `i_en=0`.
+
+### Input video's meta-information
+
+When inputting the first 4 pixels of a video sequence (i.e., the first 4 pixels of frame0, row0), you should make `i_xsize16` , `i_ysize16` ,`i_pframes_count`  valid, where:
+
+-   `i_xsize16` is video width/16. e.g., for 640x480 video, take `i_xsize16 = 640/16 = 40`. Note that `i_xsize16` the value range is `4~(2^XL)`.
+-   `i_ysize16` is video width/16. e.g., for 640x480 video, take `i_xsize16 = 480/16 = 30`. Note that `i_ysize16` the value range is `4~(2^YL)`.
+-  `i_pframes_count` Determines the number of P frames between two adjacent I frames. `0~255` The larger the number, the higher the compression rate. The recommended value is 23.
+
+:warning:  This module only supports videos that are multiples of 16 in both width and height, such as 1920x1152. If the width and height of the video is not 16, it should be pad into multiple of 16 before being sent to this module. For example, a 1910x1080 video should be padded to 1920x1088.
+
+:warning:  This module does not support videos with width and height less than 64, so the least legal value of `i_xsize16`  and `i_ysize16` is 4.
+
+### Ends the current video sequence
+
+When several frames are input **If you want to end the current video sequence (there is no limit to the number of frames in a video sequence), you need to send a "end the current video sequence" request to the module**, the specific method is to `i_sequence_stop=1` maintain a period, either of the following two ways:
+
+- While inputting the last 4 pixels of the video sequence `i_sequence_stop=1`;
+- After a number of cycles following the input of the last 4 pixels of the video sequence `i_sequence_stop=1`.
+
+Then it is necessary to wait for the module to finish the video sequence by detecting `o_sequence_busy` the signal that `o_sequence_busy=1` the delegate module is encoding a sequence; `o_sequence_busy=0` the delegate module is idle. When you send the "end the current video sequence" request, you should wait for `o_sequence_busy` the change `0` from `1` to, which means that the encoding of the video sequence has been completely completed.
+
+### Start entering the next video sequence
+
+When the previous video sequence is completely finished ( `o_sequence_busy` change from `1` to `0`), the next video sequence can be input (that is, input the first four pixels of the next video sequence. At the same time, let `i_xsize16`, `i_ysize16`, `i_pframes_count` valid).
+
+### Output MPEG2 code stream
+
+ `o_en, o_last, o_data` These three signals are for outputting the encoded MPEG2 bitstream.
+
+When `o_en=1` , 32 bytes of MPEG2 stream data will appear on  `o_data`  .
+
+When `o_en=1`  . If `o_last=1`, it means that this is the last data of the video sequence, and the first data of the next video sequence will be output next time when `o_en=1`.
+
+> :warning: `o_data` is **Little Endian**, `o_data[7:0]` ist the first byte, `o_data[15:8]` the second byte... `o_data[255:248]` Is the last byte. Little endian is used because most buses are also little endian (for example, the AXI bus).
+
+>  When a module is idle (i.e. `o_sequence_busy=0`), it cannot output data (`o_en=1` is impossible)
+
+　
+
+## Example waveforms
+
+To summarize the above description, an example **Figure 1** of the operating waveform of the module is given, in which the gray waveform represents the don't care (which can take any value without affecting anything).
+
+|![模块操作波形](./figures/wave.png)|
+| :---------------------------------: |
+|**Figure 1**: Example Waveform for Module|
+
+　
+
+　
+
+# Deploy result
+
+**Table 2** It shows the FPGA resource usage by the module when taking different `VECTOR_LEVEL` parameters. The FPGA is Xilinx Kintex-7 **XC7K325TFFV676-1**.
+
+**Table 2** : *Resource consumption of this module on XC7K325TFFV676-1*
+
+|      | `VECTOR_LEVEL=1, XL=YL=6`| `VECTOR_LEVEL=2, XL=YL=6` | `VECTOR_LEVEL=3, XL=YL=6` |
+| :----------: | :-----------------------: | :-----------------------: | :-----------------------: |
+|     LUT      |           87964           |          106861           |          134988           |
+|      FF      |           63468           |           69568           |           76677           |
+|    LUTRAM    |             1             |             1             |             1             |
+|    DSP48E    |            125            |            125            |            125            |
+|   BRAM36K    |            405            |            405            |            405            |
+| max clock freq. |67 MHz|          67 MHz           |          67 MHz           |
+
+　
+
+　
+
+# Simulation
+
+The files related to the simulation are in the [SIM](./SIM) directory, where:
+
+- tb_mpeg2encoder.v is a testbench for mpeg2encoder.v, which can read the original pixels of three video sequences from the three original pixel files, and send them to the mpeg2encoder according to the waveform in **Figure 1**. And writes its output stream to files (.m2v file). You can use VLC Media Player 3.0.18 to open these.m2v files.
+- tb_run_iverilog.bat is a command script to run simulation using iverilog.
+- data.zip contains the raw pixels of 3 videos I provided to be compressed, which will be read by tb_mpeg2encoder.v.
+
+　
+
+## Prepare YUV RAW files (raw pixel files)
+
+The testbench needs to input original video pixels to mpeg2encoder, but most videos is already encoded (it is basically impossible to have a video stored in the original pixels), so before simulation, you need to prepare YUV RAW files (original pixel file). The testbench can then read the file and feed pixels into [mpeg2encoder](./RTL/mpeg2encoder.v) module.
+
+### Format of YUV RAW files
+
+We specify that YUV RAW files store each frame of a video in sequence, with Y U V three components of each frame stored separately.
+
+For example, for a 128x64 video (8192 pixels per frame), the file's:
+
+- The first 8192 bytes hold all Y pixels of frame0
+- The next 8192 bytes hold all U pixels of frame1
+- The next 8192 bytes hold all V pixels of frame1
+- The next 8192 bytes hold all Y pixels of frame1
+- The next 8192 bytes hold all U pixels of frame1
+- The next 8192 bytes hold all V pixels of frame1
+- ......
+
+### Use the YUV RAW file I provided
+
+I provided three YUV RAW files corresponding to the video, and you can get them by unzipping [data.zip](./SIM/data.zip).
+
+you can get 288x208.raw, 640x320.raw and 1440x704.raw. They are actually decoded from 288x208.mp4, 640x320.mp4 and 1440x704.mp4.
+
+### Use my Python program to convert more videos to YUV RAW files
+
+If you want to simulate other videos, you can use a Python program I provided to convert video files to YUV RAW files.
+
+After unzipping data.zip, you can find a Python 3 program convert_video_to_yuv_raw.py , which can convert compressed video files (.mp4, .mkv, etc.) into YUV RAW files.
+
+Before running this Python program, you need to install Python 3, and then install the numpy and opencv libraries :
+
+
+```powershell
+python -m pip install numpy
+python -m pip install opencv-python
+```
+
+Then, for example, if you want to convert a video file `1.mp4` to a YUV RAW file `1.raw`, you need to run command:
+
+
+```powershell
+python convert_video_to_yuv_raw.py 1.mp4 1.raw
+```
+
+　
+
+## Run the simulation
+
+After unzipping the data.zip, a directory called 'data' will appear under the SIM directory, which contains YUV RAW files. Then we can run simulation.
+
+### Use iverilog to simulate
+
+Before using iverilog for simulation, you need to install iverilog, see: [iverilog_usage](https://github.com/WangXuan95/WangXuan95/blob/main/iverilog_usage/iverilog_usage.md)
+
+Then double-click the tb_run_iverilog.bat to run simulation (Windows only).
+
+### Use other simulators
+
+You need to add the tb_mpeg2encoder.v and mpeg2encoder.v to a simulation project. Then set tb_mpeg2encoder.v as top.
+
+Then modify the line 25\~41 of tb_mpeg2encoder.v to specify the path of input YUV RAW file, the path of the output MPEG2 video file (.m2v), and the width and height of each video.
+
+Here I use the relative path of the 3 videos by default. **Note that some simulators do not support relative paths, so you have to use absolute paths instead.**
+
+Then you may also need to configure parameters `XL` and `YL` on line 23, according to the description in **Table 1**.
+
+Then you can start running the simulation.
+
+### Verify the simulation results
+
+This simulation takes a long time (probably a few hours for compressing the 3 YUV RAW files I provided).
+
+When all three videos have been encoded, it will encounter `$finish` to finish simuation. Produces three.m2v files, which **can be opened by Video Viewer** (e.g., VLC Media Player 3.0.18 can be used).
+
+　
+
+　
+
+# <span id="rgb2yuv_en"> Attachment: RGB to YUV</span>
+
+RGB and YUV are two ways to represent pixels:
+
+- RGB represents a pixel with three components of red, green and blue, and each component occupies 1 byte (0 \~ 255);
+- YUV represents a pixel with three components of Y (lightness), U (blue chrominance) and V (red chrominance), and each component also occupies 1 byte (0 \~ 255).
+
+There is a simple linear mapping between RGB and YUV, and the following Python code can convert an RGB pixel to YUV:
+
+
+```python
+# input:  int r (0~255), int g (0~255), int b (0~255)
+# output: int y (0~255), int u (0~255), int v (0~255)
+def rgb2yuv(r, g, b):
+    COEF_R, COEF_B = 0.299, 0.114
+    y = COEF_R * r + COEF_B * b + (1-COEF_R-COEF_B) * g
+    u = 0.5/(1.0-COEF_B) * (b - y)
+    v = 0.5/(1.0-COEF_R) * (r - y)
+    y = (219.0/256.0)*y + 16.5
+    u = (224.0/256.0)*u + 128.5
+    v = (224.0/256.0)*v + 128.5
+    return int(y), int(u), int(v)
+```
+
+　
+
+# References
+
+- https://github.com/prashanth5192/Approx-mpeg2, 2022.
+- A Guide to MPEG Fundamentals and Protocol Analysis, Tektronix, 2022: https://www.tek.com/en/documents/primer/guide-mpeg-fundamentals-and-protocol-analysis
+
+　
+
+　
+
+　
+
+　
+
+　
+
+<span id="cn">FPGA MPEG2 video encoder</span>
 ===========================
 
 基于 **FPGA** 的**高性能 MPEG2** 视频编码器，可实现视频压缩。
 
-![diagram](diagram.png)
+![diagram](./figures/diagram.png)
 
 * **输入**：YUV 444 原始像素
-  * 最简单的输入顺序：按逐帧、逐行、逐列的顺序输入。
-  * 每时钟周期可输入一行内相邻的 4 个像素，无反压握手 (无需停顿，任何周期都可以输入像素) 。
-  * 每个像素包含 8-bit Y (明度) 、8-bit U (蓝色度) 、8-bit V (红色度) 。
-* **输出**： 完整的 MPEG2 码流
-  * 输出端口宽度为 256-bit ，每周期可能输出 32 字节
-  * 将这些字节存储于文件后，可使用播放软件 (例如 VLC Media Player 3.0.18) 打开和查看
-* **代码兼容性**：纯 RTL (SystemVerilog 2005) 编写，适用于各种厂家和型号的 FPGA 
+  * 最方便的输入顺序：按逐帧、逐行、逐列的顺序输入。
+  * 每周期可输入相邻的 4 个像素，无反压握手 (无需停顿，任何周期都可以输入像素) 。
+* **输出**： MPEG2 码流。将其存储于文件后，可使用播放软件 (例如 VLC Media Player 3.0.18) 打开和查看
+* **代码兼容性**：纯 Verilog2001 编写，适用于各种厂家和型号的 FPGA 
 * **性能** ：
   * 每周期可输入 4 个像素
   * 在 Xilinx Kintex-7 XC7K325TFFV676-1 上最大时钟频率为 67MHz 
   * 吞吐率达到 67*4= **268 MPixels/s** 。对 1920x1152 的视频的编码帧率为 121 帧/秒
-* **FPGA资源消耗**：
+* **资源消耗**：
   * **无需外部存储器**
   * 典型配置在 Xilinx 7 系列 FPGA 上消耗 **134k LUT**, **125 个 DSP48E**, **405个 BRAM36K** 
 * **静态可调参数** (综合前确定，部署后不可调) ：
-  * 视频的最大宽度、最大高度：越大则消耗 BRAM 越多
+  * 支持的视频的最大宽度、最大高度：越大则消耗 BRAM 越多
   * 动作估计的搜索范围：越大则压缩率越高，但消耗 LUT 越多
   * 量化级别 ：越大则压缩率越高，但输出视频质量越差
 * **动态可调参数** (可在运行时针对每个视频序列进行调整) ：
   * 视频的宽度和高度
   * I帧间距 (两个I帧之间P帧的数量) ：越大则压缩率越高。
 * **后续工作**：
-  * 对 LUT 和 DSP 资源的优化。因为该模块目前消耗资源还不够小，一般只适用于 Xilinx Kintex-7 这种规模 (或更大规模) 的 FPGA。后续优化后，希望能部署在中等规模的 Artix-7 上。
+  * 对 LUT 和 DSP 资源的优化。因为该模块目前消耗资源还不够小，一般只适用于 Kintex-7 这种规模 (或更大) 的 FPGA。后续优化后，希望能部署在中等规模的 Artix-7 上。
 
 　
 
@@ -50,7 +441,9 @@ FPGA MPEG2 video encoder
 
 # 模块使用方法
 
-[RTL/mpeg2encoder.sv](./RTL/mpeg2encoder.sv) 是 MPEG2 编码器的顶层模块 (单模块设计，没有子模块) ，其参数和接口如下：
+[RTL/mpeg2encoder.v](./RTL/mpeg2encoder.v) 是 MPEG2 编码器的顶层模块 (单模块设计，没有子模块) 。
+
+其参数和接口如下：
 
 ```verilog
 module mpeg2encoder #(
@@ -84,7 +477,7 @@ module mpeg2encoder #(
 
 ## 模块参数
 
-[mpeg2encoder](./RTL/mpeg2encoder.sv) 的模块参数 (parameter) 如**表1**。
+mpeg2encoder 模块的参数 (parameter) 如**表1**。
 
 　　**表1** : *模块参数说明*
 
@@ -105,7 +498,7 @@ module mpeg2encoder #(
 
 ### 模块复位
 
-`rstn` 是本模块的异步复位，`rstn=0` 复位，`rstn=1` 释放复位 。在 FPGA 上电后，使用本模块之前，**必须！必须！必须进行至少一次复位** (让 `rstn=0` 至少一个时钟周期，然后让 `rstn=1` 释放复位) 。 **在正常工作时不需要进行任何复位**。当然，如果你想，也可以进行复位，则模块的所有状态恢复初始状态。
+`rstn` 是本模块的异步复位，`rstn=0` 复位，`rstn=1` 释放复位 。在 FPGA 上电后，使用本模块之前，**必须！必须！必须进行至少一次复位** (让 `rstn=0` 至少一个时钟周期，然后让 `rstn=1` 释放复位) 。 在正常工作时不需要进行任何复位。当然，如果你想，也可以进行复位，则模块的所有状态恢复初始状态。
 
 ### 输入像素
 
@@ -249,9 +642,11 @@ i_V3 = V103
 - 等待 `o_sequence_busy` 从 `1` 变成 `0` ，然后才可以输入下一个视频序列。
 - 在以上过程的同时， `o_en` 会断续出现 `1` 。在 `o_en=1` 时从 `o_data` 上拿到 MPEG2 输出流。当该视频序列的最后一个数据输出的同时 `o_last=1` 。
 
-|    ![模块操作波形](./wave.png)    |
-| :-------------------------------: |
-| **图1**：对模块进行操作的示例波形 |
+| ![模块操作波形](./figures/wave.png) |
+| :---------------------------------: |
+|       **图1**：模块的示例波形       |
+
+　
 
 　
 
@@ -261,7 +656,7 @@ i_V3 = V103
 
 　　**表2** : *本模块在XC7K325TFFV676-1上的资源消耗*
 
-|  参数配置→   | `VECTOR_LEVEL=1, XL=YL=6` | `VECTOR_LEVEL=2, XL=YL=6` | `VECTOR_LEVEL=3, XL=YL=6` |
+|   参数配置   | `VECTOR_LEVEL=1, XL=YL=6` | `VECTOR_LEVEL=2, XL=YL=6` | `VECTOR_LEVEL=3, XL=YL=6` |
 | :----------: | :-----------------------: | :-----------------------: | :-----------------------: |
 |     LUT      |           87964           |          106861           |          134988           |
 |      FF      |           63468           |           69568           |           76677           |
@@ -274,37 +669,47 @@ i_V3 = V103
 
 　
 
+　
+
 # 仿真
 
-[RTL/tb_mpeg2encoder.sv](./RTL/tb_mpeg2encoder.sv) 是针对 [RTL/mpeg2encoder.sv](./RTL/mpeg2encoder.sv)  的 testbench，它能从3个原始像素文件中读取3个视频序列的原始像素，按照**图1**所示的操作波形把它们先后送入 [mpeg2encoder](./RTL/mpeg2encoder.sv)  ，并将它输出的 MPEG2 码流原封不动的写入文件。这些文件可以使用视频查看器 (比如 VLC Media Player 3.0.18) 打开和查看。
+仿真相关的文件都在 [SIM](./SIM) 目录中，其中：
+
+- tb_mpeg2encoder.v 是针对 mpeg2encoder.v 的 testbench，它能从3个原始像素文件中读取3个视频序列的原始像素，按照**图1**所示的操作波形把它们先后送入 mpeg2encoder ，并将它输出的码流写入文件 (.m2v文件) 。你可以使用视频查看器 (比如 VLC Media Player 3.0.18) 打开和查看这些 .m2v 文件。
+- tb_run_iverilog.bat 是运行 iverilog 仿真的命令脚本。
+- data.zip 包含我提供的3个待压缩视频的原始像素，会被 tb_mpeg2encoder.v 读取。
 
 > 之所以要先后编码 3 个视频序列，是为了进行全面的验证 (验证该模块可以正常地结束一个视频序列和开始编码下一个视频序列)。
 
+　
+
 ## 准备 YUV RAW 文件 (原始像素文件)
 
-我们的 testbench 需要给 [mpeg2encoder](./RTL/mpeg2encoder.sv) 输入视频的原始像素，但电脑上的视频一般都是编码后的 (基本上不可能有以原始像素存储的视频)，所以在进行仿真前，需要准备 YUV RAW 文件 (原始像素文件)，然后 testbench 才能读取该文件并送入 [mpeg2encoder](./RTL/mpeg2encoder.sv) 模块。
+该 testbench 需要给 mpeg2encoder 输入视频的原始像素，但电脑上的视频一般都是编码后的 (基本上不可能有以原始像素存储的视频)，所以在进行仿真前，需要准备 YUV RAW 文件 (原始像素文件)，然后 testbench 才能读取该文件并送入 [mpeg2encoder](./RTL/mpeg2encoder.v) 模块。
 
 ### YUV RAW 文件的格式
 
 我们规定 YUV RAW 文件中按顺序存放一个视频中的每个帧，每个帧的 Y U V 三个分量分别存储。例如对于一个 128x64 的视频 (每个帧8192个像素)，则该文件的：
 
-- 最开始的 8192 个字节存放第0帧的所有 Y
-- 然后的 8192 个字节存放第0帧的所有 U
-- 然后的 8192 个字节存放第0帧的所有 V
-- 然后的 8192 个字节存放第1帧的所有 Y
+- 最开始的 8192 个字节存放第0帧的所有 Y 像素
+- 然后的 8192 个字节存放第0帧的所有 U 像素
+- 然后的 8192 个字节存放第0帧的所有 V 像素
+- 然后的 8192 个字节存放第1帧的所有 Y 像素
+- 然后的 8192 个字节存放第1帧的所有 U 像素
+- 然后的 8192 个字节存放第1帧的所有 V 像素
 - 以此类推……
 
 ### 使用我提供的 YUV RAW 文件
 
-我提供了3个视频对应的 YUV RAW 文件，把我提供的 [data.zip](./data.zip) 解压后就可以得到它们，分别是 288x208.raw, 640x320.raw 和 1440x704.raw，它们实际上是 288x208.mp4, 640x320.mp4, 1440x704.mp4 这三个视频解码后得到的。
+我提供了3个视频对应的 YUV RAW 文件，把我提供的 [data.zip](./SIM/data.zip) 解压后就可以得到它们，分别是 288x208.raw, 640x320.raw 和 1440x704.raw，它们实际上是 288x208.mp4, 640x320.mp4, 1440x704.mp4 这三个视频解码后得到的。
 
 ### 使用我提供的 Python 程序把更多视频转化为 YUV RAW 文件
 
-如果你想对其它的视频进行仿真，可以使用我提供的一个 Python 程序把它转化为 YUV RAW 文件。
+如果你想对其它的视频进行仿真，可以使用我提供的一个 Python 程序把视频文件转化为 YUV RAW 文件。
 
-[data.zip](./data.zip) 解压后里面有一个 Python 3 程序 convert_video_to_yuv_raw.py ，它可以把已压缩的视频文件 (也就是常见的 .mp4, .mkv 等文件) 转化为 YUV RAW 文件。
+data.zip 解压后里面有一个 Python 3 程序 convert_video_to_yuv_raw.py ，它可以把已压缩的视频文件 (也就是常见的 .mp4, .mkv 等文件) 转化为 YUV RAW 文件。
 
-在运行该 Python 程序前，需要安装 Python 3 ，然后安装它依赖的 numpy 库和 opencv 库：
+在运行该 Python 程序前，需要安装 Python3 ，然后安装它依赖的 numpy 库和 opencv 库：
 
 ```powershell
 # 安装 convert_video_to_yuv_raw.py 所需的依赖库：
@@ -312,7 +717,7 @@ python -m pip install numpy
 python -m pip install opencv-python
 ```
 
-然后，例如你想把视频文件 `1.mp4` 转化为 YUV RAW 文件 `1.raw` ，运行命令：
+然后，例如你想把视频文件 `1.mp4` 转化为 YUV RAW 文件 `1.raw` ，就需要在 convert_video_to_yuv_raw.py 所在的目录里运行命令：
 
 ```powershell
 # 把视频文件 1.mp4 转化为 YUV RAW 文件 1.raw ：
@@ -323,20 +728,29 @@ python convert_video_to_yuv_raw.py 1.mp4 1.raw
 
 ## 运行仿真
 
-有了 YUV RAW 文件后，就可以运行仿真。
+把 data.zip 解压后， SIM 目录下会出现一个 data 目录，里面包含 YUV RAW 文件。此时我们就可以进行仿真
 
-你需要把 [RTL/tb_mpeg2encoder.sv](./RTL/tb_mpeg2encoder.sv) 和 [RTL/mpeg2encoder.sv](./RTL/mpeg2encoder.sv) 这两个文件加入仿真工程，以 [tb_mpeg2encoder.sv](./RTL/tb_mpeg2encoder.sv) 为仿真顶层。
+### 使用 iverilog 仿真
 
-然后修改 [tb_mpeg2encoder.sv](./RTL/tb_mpeg2encoder.sv) 的第 25 行 \~ 第 41 行的配置，指定每个视频的输入的 YUV RAW 文件的路径，输出的 MPEG2 视频文件 (.m2v) 的路径，以及视频序列的宽和高。例如：
+使用 iverilog 进行仿真前，需要安装 iverilog ，见：[iverilog_usage](https://github.com/WangXuan95/WangXuan95/blob/main/iverilog_usage/iverilog_usage.md)
 
-- `VIDEO1_IN_YUV_RAW_FILE` : 是第一个视频的 YUV RAW 文件的路径，testbench 会从中读取原始像素并送入 [mpeg2encoder](./RTL/mpeg2encoder.sv) 。
-- `VIDEO1_OUT_MPEG2_FILE` : 是第一个视频的 MPEG2 输出视频文件 (.m2v) 的路径，testbench 会把 [mpeg2encoder](./RTL/mpeg2encoder.sv) 的输出写入该文件。
-- `VIDEO1_XSIZE` : 是第一个视频的宽。
-- `VIDEO1_YSIZE` : 是第一个视频的高。
+然后双击 tb_run_iverilog.bat 即可运行仿真 (仅限 Windows)。
 
-然后你可能还需要配置第 22\~23 行的参数 `XL` 和 `YL` ，详见**表1** 。
+### 使用其它仿真器
 
-然后你就可以开始运行仿真，该仿真需要消耗很长时间 (如果用我提供的 3 个 YUV RAW 文件，大概需要2\~3小时）。
+你需要把 tb_mpeg2encoder.v 和 mpeg2encoder.v 这两个文件加入仿真工程，以 tb_mpeg2encoder.v 为仿真顶层。
+
+然后修改 tb_mpeg2encoder.v 的第 25 行 \~ 第 41 行的配置，指定每个视频的输入的 YUV RAW 文件的路径，输出的 MPEG2 视频文件 (.m2v) 的路径，以及视频序列的宽和高。
+
+这里我默认使用了这3个视频的相对路径。**注意有些仿真器不支持相对路径，你就要改为绝对路径**。
+
+然后你可能还需要配置第 23 行的参数 `XL` 和 `YL` ，详见**表1** 。
+
+然后你就可以开始运行仿真。
+
+### 检验仿真结果
+
+该仿真需要消耗很长时间 (如果用我提供的 3 个 YUV RAW 文件，大概需要几个小时）。
 
 当3个视频都编码结束后，仿真程序会遇到 `$finish` 而结束。产生 3 个 .m2v 文件，它们**可以被视频查看器打开** (例如可以使用 VLC Media Player 3.0.18) 。
 
